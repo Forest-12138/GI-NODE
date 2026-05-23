@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 import matplotlib.pyplot as plt
 import numpy as np
+import matplotlib.animation as animation
 import torchvision.transforms.functional as TF
 import torch.nn.functional as F
 from torch.nn.utils import spectral_norm
@@ -388,9 +389,13 @@ with torch.no_grad():
 # ==========================================
 # 6. 可视化
 # ==========================================
+# ==========================================
+# 6. 可视化与视频导出
+# ==========================================
 x_gt = x_test_gt.cpu().numpy()
-
 x_rec_t = torch.from_numpy(x_recon).float().to(device)
+
+# 计算最终的误差指标
 y_final = torch.einsum('tmhw,thw->tm', A, x_rec_t) / SCALE_FACTOR
 meas_mse = nn.MSELoss()(y_final, y_measured).item()
 img_mse = nn.MSELoss()(x_rec_t, x_test_gt).item()
@@ -398,16 +403,50 @@ print(f"\nFinal Results:")
 print(f"   Measurement MSE = {meas_mse:.6f}")
 print(f"   Image MSE       = {img_mse:.6f}")
 
-frames = [0, T // 4, T // 2, 3 * T // 4, T - 1]
-fig, axes = plt.subplots(2, len(frames), figsize=(15, 6))
-for i, f in enumerate(frames):
-    axes[0, i].imshow(x_gt[f], cmap='gray', vmin=0, vmax=1)
-    axes[0, i].set_title(f"GT t={f}");
-    axes[0, i].axis('off')
-    axes[1, i].imshow(x_recon[f], cmap='gray', vmin=0, vmax=1)
-    axes[1, i].set_title(f"Recon t={f}");
-    axes[1, i].axis('off')
-plt.suptitle(f"Hollow Ring SPI-NODE (SPF={SPF * 100:.0f}%)", fontsize=14)
+# --- 静态帧切片保存 (保留你原有的功能) ---
+frames_to_show = [0, T // 4, T // 2, 3 * T // 4, T - 1]
+fig_static, axes_static = plt.subplots(2, len(frames_to_show), figsize=(15, 6))
+for i, f in enumerate(frames_to_show):
+    axes_static[0, i].imshow(x_gt[f], cmap='gray', vmin=0, vmax=1)
+    axes_static[0, i].set_title(f"GT t={f}")
+    axes_static[0, i].axis('off')
+    axes_static[1, i].imshow(x_recon[f], cmap='gray', vmin=0, vmax=1)
+    axes_static[1, i].set_title(f"Recon t={f}")
+    axes_static[1, i].axis('off')
+fig_static.suptitle(f"Damped Spiral Ring SPI-NODE (SPF={SPF * 100:.0f}%)", fontsize=14)
 plt.tight_layout()
-plt.savefig("reconstruction_v2.png", dpi=150)
+fig_static.savefig("reconstruction_static.png", dpi=150)
+plt.close(fig_static) # 关闭静态图，防止重叠
+
+# --- 动态视频/GIF 生成 ---
+print("\nGenerating Animation Video...")
+fig_anim, axes_anim = plt.subplots(1, 2, figsize=(10, 5))
+
+# 初始化两块画布
+axes_anim[0].axis('off')
+axes_anim[1].axis('off')
+axes_anim[0].set_title("Ground Truth")
+axes_anim[1].set_title("SPI-NODE Reconstruction")
+
+# 初始化第一帧的图像对象
+im_gt = axes_anim[0].imshow(x_gt[0], cmap='gray', vmin=0, vmax=1)
+im_rec = axes_anim[1].imshow(x_recon[0], cmap='gray', vmin=0, vmax=1)
+
+# 定义每一帧的更新逻辑
+def update(frame_idx):
+    im_gt.set_array(x_gt[frame_idx])
+    im_rec.set_array(x_recon[frame_idx])
+    fig_anim.suptitle(f"Damped Spiral Ring - Time Step: {frame_idx + 1}/{T}", fontsize=14)
+    return [im_gt, im_rec]
+
+# 创建动画对象
+# frames=T 表示一共有 T 帧，interval=200 表示每帧间隔 200 毫秒 (相当于 5 FPS)
+ani = animation.FuncAnimation(fig_anim, update, frames=T, interval=200, blit=False)
+
+# 保存为 GIF 文件 (Pillow 引擎是内置的，无需额外安装环境)
+video_filename = "reconstruction_video.gif"
+ani.save(video_filename, writer='pillow')
+print(f"Video successfully saved to {video_filename}!")
+
+# 如果你希望在运行结束后直接在 IDE 中弹窗播放，可以取消下面这行的注释
 plt.show()
