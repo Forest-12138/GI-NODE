@@ -24,43 +24,51 @@ MINI_BATCH = 16  # 联合训练显存占用大，MB 设为 16 以适配常规 GP
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 t_span = torch.linspace(0, 1, T).to(device)
+## ==========================================
+# 1. 数据加载（空心圆环的阻尼螺旋运动 ODE 轨迹）
 # ==========================================
-# 1. 数据加载（高斯小球圆周运动 ODE 轨迹）
-# ==========================================
-print("1. Generating Gaussian Blob Dataset...")
+print("1. Generating Damped Spiral Hollow Ring Dataset...")
 
-
-def generate_gaussian_ode_dataset(num_samples, T, H, W):
+def generate_spiral_ring_dataset(num_samples, T, H, W):
     seqs = []
-    R_base = 14.0
-    omega = 2 * np.pi  # 保证在 T=1 的时间内刚好完成一圈
+    # --- 阻尼螺旋的运动学参数 ---
+    R_traj = 24.0            # 初始轨道半径设定大一点，从边缘向内螺旋
+    omega = 2 * np.pi * 1.5  # 设定较高的角速度，保证在 T=1 内能转一圈半
+    gamma = 1.5              # 阻尼系数，控制向内收缩的速率
     t = torch.linspace(0, 1, T)
 
+    # --- 空心圆环的几何参数 ---
+    R_ring = 6.0             # 圆环的中心半径
+    thickness_sigma = 1.5    # 圆环边缘的高斯厚度
+
     for _ in range(num_samples):
-        # 引入初始相位和半径的随机性，防止模型死记硬背
+        # 引入初始相位和轨道半径的随机性
         phase = torch.rand(1) * 2 * np.pi
-        r = R_base + (torch.randn(1) * 1.5)
+        r_init = R_traj + (torch.randn(1) * 2.0)
 
         frames = []
         for t_step in t:
-            angle = omega * t_step + phase
-            cx = H / 2.0 + r * torch.cos(angle)
-            cy = W / 2.0 + r * torch.sin(angle)
+            # ODE 解析解：半径指数衰减，角度线性增加
+            r_t = r_init * torch.exp(-gamma * t_step)
+            angle_t = omega * t_step + phase
+
+            # 转换为笛卡尔坐标
+            cx = H / 2.0 + r_t * torch.cos(angle_t)
+            cy = W / 2.0 + r_t * torch.sin(angle_t)
 
             y, x = torch.meshgrid(torch.arange(H), torch.arange(W), indexing='ij')
-            sigma = 3.0
 
-            # 高斯小球公式，值域自然在 [0, 1] 之间
-            blob = torch.exp(-((x - cx) ** 2 + (y - cy) ** 2) / (2 * sigma ** 2))
-            frames.append(blob)
+            # 计算每个像素点到物体中心的欧氏距离，并生成空心圆环
+            dist = torch.sqrt((x - cx) ** 2 + (y - cy) ** 2)
+            ring = torch.exp(-(dist - R_ring) ** 2 / (2 * thickness_sigma ** 2))
+            frames.append(ring)
 
         seqs.append(torch.stack(frames, dim=0))
 
     return torch.stack(seqs, dim=0).to(device)
 
-
-x_train_gt = generate_gaussian_ode_dataset(TRAIN_BATCH, T, H, W)  # [B, T, H, W]
-x_test_gt = generate_gaussian_ode_dataset(1, T, H, W)[0]  # [T, H, W]
+x_train_gt = generate_spiral_ring_dataset(TRAIN_BATCH, T, H, W)  # [B, T, H, W]
+x_test_gt = generate_spiral_ring_dataset(1, T, H, W)[0]          # [T, H, W]
 print(f"   Train: {x_train_gt.shape}, Test: {x_test_gt.shape}")
 
 # ==========================================
@@ -399,7 +407,7 @@ for i, f in enumerate(frames):
     axes[1, i].imshow(x_recon[f], cmap='gray', vmin=0, vmax=1)
     axes[1, i].set_title(f"Recon t={f}");
     axes[1, i].axis('off')
-plt.suptitle(f"Circular MNIST SPI-NODE (SPF={SPF * 100:.0f}%)", fontsize=14)
+plt.suptitle(f"Hollow Ring SPI-NODE (SPF={SPF * 100:.0f}%)", fontsize=14)
 plt.tight_layout()
 plt.savefig("reconstruction_v2.png", dpi=150)
 plt.show()
